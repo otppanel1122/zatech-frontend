@@ -210,11 +210,7 @@
       padding: 6px 4px;
       border-bottom: 1px solid #edf2f7;
       font-size: 13px;
-      cursor: pointer;
-      transition: background 0.15s ease;
-      border-radius: 4px;
     }
-    .sender-item:hover { background: var(--bg-hover); }
     .sender-item:last-child { border-bottom: none; }
     .sender-name {
       font-weight: 600;
@@ -242,39 +238,6 @@
       font-size: 13px;
     }
     .sender-loading i { margin-right: 6px; color: #3b82f6; }
-
-    /* SID Detail Table */
-    .sid-detail-table {
-      margin-top: 16px;
-      display: none;
-    }
-    .sid-detail-table .table-container {
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    .sid-detail-table .table-container::-webkit-scrollbar { width: 4px; }
-    .sid-detail-table .table-container::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 10px; }
-    .sid-detail-close {
-      float: right;
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
-    .sid-detail-close:hover { background: var(--bg-hover); color: var(--text); }
-    .sid-detail-title {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
 
     .main-panel {
       flex: 1;
@@ -627,27 +590,6 @@
         <div class="sender-breakdown" id="senderBreakdown">
           <div class="sender-empty">No data yet. Run analysis.</div>
         </div>
-        <!-- SID Detail Table -->
-        <div class="sid-detail-table" id="sidDetailTable">
-          <div class="sid-detail-title">
-            <span id="sidDetailTitle">SMS Records for: <span id="sidDetailName"></span></span>
-            <button class="sid-detail-close" id="sidDetailClose"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="table-container">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th class="col-datetime">Date &amp; Time</th>
-                  <th class="sender-cell">Sender ID</th>
-                  <th class="phone-cell">Phone Number</th>
-                  <th class="message-cell">Message</th>
-                </tr>
-              </thead>
-              <tbody id="sidDetailResults">
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </div>
   </aside>
@@ -731,8 +673,7 @@
       bulkTimeEnd: null,
       loading: false,
       senderMap: {},
-      totalBulkCount: 0,
-      bulkFilteredRecords: []
+      totalBulkCount: 0
     };
 
     // ── DOM refs ──
@@ -752,10 +693,6 @@
     const pageIndicator = document.getElementById('pageIndicator');
     const prevBtn = document.getElementById('prevPage');
     const nextBtn = document.getElementById('nextPage');
-    const sidDetailTable = document.getElementById('sidDetailTable');
-    const sidDetailName = document.getElementById('sidDetailName');
-    const sidDetailResults = document.getElementById('sidDetailResults');
-    const sidDetailClose = document.getElementById('sidDetailClose');
 
     // ── 5am‑based date helpers ──
     function get5amDate(date) {
@@ -884,6 +821,7 @@
           throw new Error(json.error);
         }
 
+        // ✅ FIX: Access the data correctly
         const items = json.data?.data || [];
         const totalResults = json.data?.totalResults || items.length;
         
@@ -960,7 +898,7 @@
       renderTable();
     }
 
-    // ── FAST BULK ANALYSIS using optimized endpoint ──
+    // ── BULK ANALYSIS ──
     async function runBulkAnalysis() {
       const raw = bulkTextarea.value;
       const numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
@@ -973,112 +911,93 @@
       bulkSearchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
       progressFill.style.width = '0%';
       senderBreakdown.innerHTML = '<div class="sender-loading"><i class="fas fa-spinner fa-spin"></i> Fetching data...</div>';
-      sidDetailTable.style.display = 'none';
 
       const startDate = state.bulkTimeStart ? formatDateForAPI(state.bulkTimeStart) : '';
       const endDate = state.bulkTimeEnd ? formatDateForAPI(state.bulkTimeEnd) : '';
 
-      try {
-        // Use the optimized bulk endpoint
-        const params = new URLSearchParams();
-        params.set('numbers', numbers.join(','));
-        if (startDate) params.set('startDate', startDate);
-        if (endDate) params.set('endDate', endDate);
-
-        const resp = await fetch(`${API_BASE}/bulk?${params.toString()}`);
-        
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-        
-        const json = await resp.json();
-        
-        if (json.error) {
-          throw new Error(json.error);
-        }
-        
-        const { totalCount, breakdown, records } = json;
-        
-        // Update UI
-        bulkCountSpan.textContent = totalCount.toLocaleString();
-        state.bulkFilteredRecords = records || [];
-        
-        if (totalCount === 0) {
-          senderBreakdown.innerHTML = `
-            <div class="sender-empty">
-              No SMS records found for these numbers.
-            </div>
-          `;
-        } else {
-          // Update breakdown
-          let html = '';
-          breakdown.forEach(({ sender, count }) => {
-            html += `<div class="sender-item" data-sid="${sender}">
-              <span class="sender-name"><i class="fas fa-user"></i> ${sender}</span>
-              <span class="sender-count">${count.toLocaleString()}</span>
-            </div>`;
-          });
-          senderBreakdown.innerHTML = html;
-          
-          // Add click handlers for detail view
-          senderBreakdown.querySelectorAll('.sender-item').forEach(el => {
-            el.addEventListener('click', function() {
-              const sid = this.dataset.sid;
-              showSidDetails(sid);
-            });
-          });
-        }
-        
-        progressFill.style.width = '100%';
-        showToast(`Found ${totalCount} SMS records for ${numbers.length} numbers`, 'success');
-        
-      } catch (err) {
-        console.error('Bulk error:', err);
-        showToast(`Error: ${err.message}`, 'error');
-        senderBreakdown.innerHTML = `
-          <div class="sender-empty">
-            Error fetching data. Please try again.
-            <br><small style="color:var(--text-muted);">${err.message}</small>
-          </div>
-        `;
-      } finally {
-        bulkSearchBtn.disabled = false;
-        bulkSearchBtn.innerHTML = '<i class="fas fa-search"></i> Analyze';
-        setTimeout(() => { progressFill.style.width = '0%'; }, 2000);
+      const senderMap = {};
+      let totalCount = 0;
+      const total = numbers.length;
+      const concurrency = 5;
+      const batches = [];
+      for (let i = 0; i < numbers.length; i += concurrency) {
+        batches.push(numbers.slice(i, i + concurrency));
       }
+
+      let completed = 0;
+      for (const batch of batches) {
+        const batchPromises = batch.map(async (num) => {
+          try {
+            const params = new URLSearchParams();
+            params.set('query', num);
+            params.set('page', 1);
+            if (startDate) params.set('startDate', startDate);
+            if (endDate) params.set('endDate', endDate);
+
+            const resp = await fetch(`${API_BASE}?${params.toString()}`);
+            if (!resp.ok) return { num, records: [], error: true };
+            const json = await resp.json();
+            const items = json.data?.data || [];
+            const mapped = items.map(item => ({
+              source: item.from || '',
+              destination: item.to || '',
+              text: item.message || '',
+              time: item.createdAt || ''
+            }));
+            return { num, records: mapped, error: false };
+          } catch (e) {
+            return { num, records: [], error: true };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        completed += batch.length;
+        const pct = Math.min(100, (completed / total) * 100);
+        progressFill.style.width = pct + '%';
+
+        for (const result of batchResults) {
+          if (!result.error && result.records.length > 0) {
+            totalCount += result.records.length;
+            for (const rec of result.records) {
+              const sender = rec.source || 'unknown';
+              senderMap[sender] = (senderMap[sender] || 0) + 1;
+            }
+          }
+        }
+        updateSenderBreakdown(senderMap, totalCount);
+        bulkCountSpan.textContent = totalCount.toLocaleString();
+      }
+
+      state.senderMap = senderMap;
+      state.totalBulkCount = totalCount;
+      bulkCountSpan.textContent = totalCount.toLocaleString();
+      updateSenderBreakdown(senderMap, totalCount);
+
+      if (numbers.length > 0) {
+        destInput.value = numbers[0];
+        await refreshTable(numbers[0]);
+      }
+
+      bulkSearchBtn.disabled = false;
+      bulkSearchBtn.innerHTML = '<i class="fas fa-search"></i> Analyze';
+      progressFill.style.width = '100%';
+      setTimeout(() => { progressFill.style.width = '0%'; }, 2000);
     }
 
-    // ── Show SID Details ──
-    function showSidDetails(sid) {
-      const records = state.bulkFilteredRecords.filter(rec => {
-        return (rec.from || 'unknown') === sid;
-      });
-
-      if (records.length === 0) {
-        showToast('No records found for this Sender ID', 'info');
+    function updateSenderBreakdown(senderMap, total) {
+      if (Object.keys(senderMap).length === 0) {
+        senderBreakdown.innerHTML = '<div class="sender-empty">No sender data found</div>';
         return;
       }
-
-      sidDetailName.textContent = sid;
-      sidDetailResults.innerHTML = records.map(s => {
-        const dt = s.createdAt || 'N/A';
-        let datePart = dt,
-            timePart = '';
-        if (dt !== 'N/A') {
-          const d = new Date(dt);
-          datePart = d.toISOString().split('T')[0];
-          timePart = d.toTimeString().split(' ')[0];
-        }
-        return `<tr>
-          <td class="col-datetime"><span class="dt-date">${datePart}</span><span class="dt-time">${timePart}</span></td>
-          <td class="sender-cell">${s.from || 'N/A'}</td>
-          <td class="phone-cell">${s.to || 'N/A'}</td>
-          <td class="message-cell">${s.message || 'N/A'}</td>
-        </tr>`;
-      }).join('');
-
-      sidDetailTable.style.display = 'block';
-      sidDetailTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const sorted = Object.entries(senderMap).sort((a, b) => b[1] - a[1]);
+      let html = '';
+      sorted.forEach(([sender, count]) => {
+        html += `<div class="sender-item">
+          <span class="sender-name"><i class="fas fa-user"></i> ${sender}</span>
+          <span class="sender-count">${count.toLocaleString()}</span>
+        </div>`;
+      });
+      senderBreakdown.innerHTML = html;
     }
 
     // ── presets ──
@@ -1115,38 +1034,6 @@
       state.page = newPage;
       const val = destInput.value.trim().replace(/^\+/, '') || state.destination;
       if (val) refreshTable(val);
-    }
-
-    // ── Toast ──
-    function showToast(msg, type = 'success') {
-      const container = document.querySelector('.toast-container');
-      if (!container) {
-        // Create toast container if it doesn't exist
-        const newContainer = document.createElement('div');
-        newContainer.className = 'toast-container';
-        document.body.appendChild(newContainer);
-        container = newContainer;
-      }
-      
-      const toast = document.createElement('div');
-      toast.className = `toast toast-${type}`;
-      const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
-      const titles = { success: 'Success', error: 'Error', info: 'Info' };
-      toast.innerHTML = `
-        <div class="flex items-center justify-between">
-          <div class="toast-title"><i class="fas ${icons[type] || 'fa-info-circle'}"></i> ${titles[type] || 'Info'}</div>
-          <button class="toast-close" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="toast-body">${msg}</div>
-      `;
-      container.appendChild(toast);
-      setTimeout(() => {
-        if (toast.parentElement) {
-          toast.style.opacity = '0';
-          toast.style.transform = 'translateX(30px)';
-          setTimeout(() => toast.remove(), 300);
-        }
-      }, 5000);
     }
 
     // ── events ──
@@ -1186,10 +1073,6 @@
           e.preventDefault();
           setBulkPreset(btn.dataset.preset);
         });
-      });
-
-      sidDetailClose.addEventListener('click', () => {
-        sidDetailTable.style.display = 'none';
       });
 
       prevBtn.addEventListener('click', () => changePage(-1));
