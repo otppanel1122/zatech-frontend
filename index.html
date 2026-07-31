@@ -656,7 +656,7 @@
 
 <script>
   (function() {
-    // CHANGE THIS to your deployed backend URL
+    // ⚠️ CHANGE THIS to your deployed backend URL
     const API_BASE = 'https://zatech-backend.onrender.com/api/sms';
 
     // ── state ──
@@ -821,6 +821,7 @@
           throw new Error(json.error);
         }
 
+        // ✅ FIX: Access the data correctly
         const items = json.data?.data || [];
         const totalResults = json.data?.totalResults || items.length;
         
