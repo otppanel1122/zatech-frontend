@@ -22,7 +22,6 @@
       gap: 22px;
       align-items: flex-start;
     }
-    /* ── sidebar ── */
     .sidebar {
       flex: 0 0 420px;
       max-width: 420px;
@@ -240,7 +239,6 @@
     }
     .sender-loading i { margin-right: 6px; color: #3b82f6; }
 
-    /* ── main panel ── */
     .main-panel {
       flex: 1;
       min-width: 0;
@@ -359,7 +357,6 @@
       cursor: pointer;
     }
 
-    /* main panel date range */
     .main-date-row {
       display: flex;
       flex-wrap: wrap;
@@ -604,7 +601,6 @@
       <button class="export-btn" id="exportBtn"><i class="fas fa-download"></i> Export CSV</button>
     </div>
 
-    <!-- Main date range (separate from bulk) -->
     <div class="main-date-row">
       <span class="main-date-label">Date Range</span>
       <div class="main-date-presets" id="mainPresetContainer">
@@ -660,6 +656,7 @@
 
 <script>
   (function() {
+    // CHANGE THIS to your deployed backend URL
     const API_BASE = 'https://zatech-backend.onrender.com/api/sms';
 
     // ── state ──
@@ -670,13 +667,10 @@
       data: [],
       destination: '',
       dup: true,
-      // main (gateway) date range
       mainTimeStart: null,
       mainTimeEnd: null,
-      // bulk date range
       bulkTimeStart: null,
       bulkTimeEnd: null,
-      order: 'id:desc',
       loading: false,
       senderMap: {},
       totalBulkCount: 0
@@ -768,30 +762,19 @@
 
     function formatDateForAPI(d) {
       if (!d) return '';
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      const h = String(d.getHours()).padStart(2, '0');
-      const min = String(d.getMinutes()).padStart(2, '0');
-      return `${y}-${m}-${day}.${h}.${min}`;
+      return d.toISOString();
     }
 
-    // ── parse SMS data from ZATECH format ──
-    function parseSMSDataFromZatech(data) {
-      if (!data || !data.data || !data.data.data) return [];
-      return data.data.data.map(item => ({
-        id: item._id || '',
-        service: item.from || '',
-        source: item.from || '',
-        destination: item.to || '',
-        text: item.message || '',
-        provider: '',
-        time: item.createdAt || '',
-        time_received: item.createdAt || ''
-      }));
+    function splitDateTime(dt) {
+      if (!dt) return { date: 'N/A', time: '' };
+      const d = new Date(dt);
+      if (isNaN(d.getTime())) return { date: dt, time: '' };
+      const date = d.toISOString().split('T')[0];
+      const time = d.toTimeString().split(' ')[0];
+      return { date, time };
     }
 
-    // ── fetch for table (uses main date range) ──
+    // ── fetch for table ──
     async function fetchSMS(destOverride = null) {
       const rawDest = destOverride !== null ? destOverride : destInput.value.trim().replace(/^\+/, '');
       const effectiveDest = rawDest || state.destination;
@@ -810,9 +793,8 @@
       state.destination = effectiveDest;
       state.dup = dupCheck.checked;
 
-      // Format dates for ZATECH API
-      const startDate = state.mainTimeStart ? state.mainTimeStart.toISOString() : '';
-      const endDate = state.mainTimeEnd ? state.mainTimeEnd.toISOString() : '';
+      const startDate = state.mainTimeStart ? formatDateForAPI(state.mainTimeStart) : '';
+      const endDate = state.mainTimeEnd ? formatDateForAPI(state.mainTimeEnd) : '';
 
       const params = new URLSearchParams();
       params.set('query', effectiveDest);
@@ -824,24 +806,49 @@
         tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:30px; color:#94a3b8;">
           <i class="fas fa-spinner fa-spin" style="color:#3b82f6;"></i> Loading ...
         </td></tr>`;
+
         const resp = await fetch(`${API_BASE}?${params.toString()}`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          if (resp.status === 401) {
+            throw new Error('Authentication failed. Please update your session cookies.');
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        
         const json = await resp.json();
         
-        let parsed = parseSMSDataFromZatech(json);
+        if (json.error) {
+          throw new Error(json.error);
+        }
+
+        const items = json.data?.data || [];
+        const totalResults = json.data?.totalResults || items.length;
+        
+        let mappedData = items.map(item => ({
+          id: item._id || '',
+          service: item.from || '',
+          source: item.from || '',
+          destination: item.to || '',
+          text: item.message || '',
+          provider: '',
+          time: item.createdAt || '',
+          time_received: item.createdAt || ''
+        }));
+
         if (!state.dup) {
           const seen = new Set();
-          parsed = parsed.filter(r => {
+          mappedData = mappedData.filter(r => {
             const key = r.text + '|' + r.source;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
           });
         }
-        state.total = json.data?.totalResults || parsed.length;
+
+        state.total = totalResults;
         const start = (state.page - 1) * state.perPage;
         const end = Math.min(start + state.perPage, state.total);
-        state.data = parsed.slice(start, end);
+        state.data = mappedData.slice(start, end);
         return state.data;
       } catch (err) {
         console.error('Fetch error:', err);
@@ -890,7 +897,7 @@
       renderTable();
     }
 
-    // ── BULK ANALYSIS (uses bulk date range) ──
+    // ── BULK ANALYSIS ──
     async function runBulkAnalysis() {
       const raw = bulkTextarea.value;
       const numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
@@ -904,8 +911,8 @@
       progressFill.style.width = '0%';
       senderBreakdown.innerHTML = '<div class="sender-loading"><i class="fas fa-spinner fa-spin"></i> Fetching data...</div>';
 
-      const startDate = state.bulkTimeStart ? state.bulkTimeStart.toISOString() : '';
-      const endDate = state.bulkTimeEnd ? state.bulkTimeEnd.toISOString() : '';
+      const startDate = state.bulkTimeStart ? formatDateForAPI(state.bulkTimeStart) : '';
+      const endDate = state.bulkTimeEnd ? formatDateForAPI(state.bulkTimeEnd) : '';
 
       const senderMap = {};
       let totalCount = 0;
@@ -925,12 +932,18 @@
             params.set('page', 1);
             if (startDate) params.set('startDate', startDate);
             if (endDate) params.set('endDate', endDate);
-            
+
             const resp = await fetch(`${API_BASE}?${params.toString()}`);
             if (!resp.ok) return { num, records: [], error: true };
             const json = await resp.json();
-            const parsed = parseSMSDataFromZatech(json);
-            return { num, records: parsed, error: false };
+            const items = json.data?.data || [];
+            const mapped = items.map(item => ({
+              source: item.from || '',
+              destination: item.to || '',
+              text: item.message || '',
+              time: item.createdAt || ''
+            }));
+            return { num, records: mapped, error: false };
           } catch (e) {
             return { num, records: [], error: true };
           }
@@ -1047,7 +1060,6 @@
         if (val) refreshTable(val);
       });
 
-      // Main presets
       document.querySelectorAll('.main-date-presets button').forEach(btn => {
         btn.addEventListener('click', e => {
           e.preventDefault();
@@ -1055,7 +1067,6 @@
         });
       });
 
-      // Bulk presets
       document.querySelectorAll('#presetContainer button').forEach(btn => {
         btn.addEventListener('click', e => {
           e.preventDefault();
@@ -1088,7 +1099,6 @@
 
     // ── init ──
     function init() {
-      // Main default
       const mainDefault = 'last30';
       const mainResult = getPresetDates(mainDefault);
       if (mainResult) {
@@ -1096,7 +1106,6 @@
         state.mainTimeEnd = mainResult.end;
         mainRangeLabel.textContent = mainResult.label;
       }
-      // Bulk default
       const bulkDefault = 'last30';
       const bulkResult = getPresetDates(bulkDefault);
       if (bulkResult) {
