@@ -658,6 +658,8 @@
   (function() {
     // ⚠️ CHANGE THIS to your deployed backend URL
     const API_BASE = 'https://zatech-backend.onrender.com/api/sms';
+    // Bulk request timeout (5 minutes)
+    const BULK_TIMEOUT = 300000; // 5 minutes
 
     // ── state ──
     const state = {
@@ -897,7 +899,7 @@
       renderTable();
     }
 
-    // ── BULK ANALYSIS – SINGLE POST REQUEST ──
+    // ── BULK ANALYSIS – SINGLE POST REQUEST with timeout ──
     async function runBulkAnalysis() {
       const raw = bulkTextarea.value;
       const numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
@@ -906,24 +908,42 @@
         return;
       }
 
+      // Warn if very large
+      if (numbers.length > 5000) {
+        if (!confirm(`You are about to analyze ${numbers.length} numbers. This may take several minutes. Continue?`)) {
+          return;
+        }
+      }
+
       bulkSearchBtn.disabled = true;
       bulkSearchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
       progressFill.style.width = '0%';
-      senderBreakdown.innerHTML = '<div class="sender-loading"><i class="fas fa-spinner fa-spin"></i> Fetching data...</div>';
+      senderBreakdown.innerHTML = '<div class="sender-loading"><i class="fas fa-spinner fa-spin"></i> Fetching data... (this may take a while)</div>';
 
       const startDate = state.bulkTimeStart ? formatDateForAPI(state.bulkTimeStart) : '';
       const endDate = state.bulkTimeEnd ? formatDateForAPI(state.bulkTimeEnd) : '';
+
+      // AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), BULK_TIMEOUT);
 
       try {
         const resp = await fetch(`${API_BASE}/bulk`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ numbers, startDate, endDate })
+          body: JSON.stringify({ numbers, startDate, endDate }),
+          signal: controller.signal
         });
 
+        clearTimeout(timeoutId);
+
         if (!resp.ok) {
-          const errText = await resp.text();
-          throw new Error(`Server error ${resp.status}: ${errText}`);
+          let errMsg = `Server error ${resp.status}`;
+          try {
+            const errData = await resp.json();
+            errMsg = errData.error || errMsg;
+          } catch (e) {}
+          throw new Error(errMsg);
         }
 
         const result = await resp.json();
@@ -950,9 +970,15 @@
           await refreshTable(numbers[0]);
         }
       } catch (err) {
-        alert('Bulk analysis failed: ' + err.message);
-        senderBreakdown.innerHTML = '<div class="sender-empty">Error: ' + err.message + '</div>';
+        if (err.name === 'AbortError') {
+          alert('Bulk analysis timed out after 5 minutes. Try with fewer numbers or a shorter date range.');
+          senderBreakdown.innerHTML = '<div class="sender-empty">Request timed out.</div>';
+        } else {
+          alert('Bulk analysis failed: ' + err.message);
+          senderBreakdown.innerHTML = '<div class="sender-empty">Error: ' + err.message + '</div>';
+        }
       } finally {
+        clearTimeout(timeoutId);
         bulkSearchBtn.disabled = false;
         bulkSearchBtn.innerHTML = '<i class="fas fa-search"></i> Analyze';
         setTimeout(() => { progressFill.style.width = '0%'; }, 2000);
