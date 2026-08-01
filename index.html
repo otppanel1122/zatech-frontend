@@ -918,7 +918,7 @@
       const senderMap = {};
       let totalCount = 0;
       const total = numbers.length;
-      const concurrency = 5;
+      const concurrency = 300;
       const batches = [];
       for (let i = 0; i < numbers.length; i += concurrency) {
         batches.push(numbers.slice(i, i + concurrency));
