@@ -744,7 +744,7 @@
       loading: false,
       senderMap: {},
       totalBulkCount: 0,
-      // For modal: we'll store a lookup of sender -> destinations
+      // This will hold sender -> { destination: count } from the bulk result
       senderDestinations: {}
     };
 
@@ -981,12 +981,21 @@
     // ── Modal: show destinations for a sender ──
     function showDestinations(sender) {
       if (!sender) return;
-      const destMap = state.senderDestinations[sender];
+      // Use the bulk senderDestinations (if available), otherwise build from current page data
+      let destMap = state.senderDestinations[sender];
+      if (!destMap || Object.keys(destMap).length === 0) {
+        // Fallback: build from current page data (if bulk not available)
+        destMap = {};
+        state.data.forEach(rec => {
+          if (rec.source === sender && rec.destination) {
+            destMap[rec.destination] = (destMap[rec.destination] || 0) + 1;
+          }
+        });
+      }
       if (!destMap || Object.keys(destMap).length === 0) {
         modalDestList.innerHTML = '<div style="color:#94a3b8; padding:20px 0;">No destinations found for this sender.</div>';
       } else {
         let html = '';
-        // Sort by count descending
         const sorted = Object.entries(destMap).sort((a, b) => b[1] - a[1]);
         sorted.forEach(([number, count]) => {
           html += `<div class="modal-dest-item">
@@ -1027,7 +1036,7 @@
       const startDate = state.bulkTimeStart ? formatDateForAPI(state.bulkTimeStart) : '';
       const endDate = state.bulkTimeEnd ? formatDateForAPI(state.bulkTimeEnd) : '';
 
-      // Reset senderDestinations for fresh data
+      // Reset state
       state.senderDestinations = {};
       state.senderMap = {};
       state.totalBulkCount = 0;
@@ -1085,6 +1094,10 @@
               }
 
               if (data.done) {
+                // Store the full senderDestinations from the final payload
+                if (data.senderDestinations) {
+                  state.senderDestinations = data.senderDestinations;
+                }
                 progressFill.style.width = '100%';
                 // Load first number into table
                 if (numbers.length > 0) {
@@ -1122,27 +1135,6 @@
       });
       senderBreakdown.innerHTML = html;
     }
-
-    // ── Override fetchSMS to also fill senderDestinations for modal ──
-    const originalFetch = fetchSMS;
-    fetchSMS = async function(destOverride) {
-      const result = await originalFetch.call(this, destOverride);
-      // After fetching, build senderDestinations from the data
-      if (state.data.length > 0) {
-        const destMap = {};
-        state.data.forEach(rec => {
-          const sender = rec.source;
-          if (!sender) return;
-          if (!destMap[sender]) destMap[sender] = {};
-          const dest = rec.destination;
-          if (dest) {
-            destMap[sender][dest] = (destMap[sender][dest] || 0) + 1;
-          }
-        });
-        state.senderDestinations = destMap;
-      }
-      return result;
-    };
 
     async function refreshTable(destOverride = null) {
       await fetchSMS(destOverride);
