@@ -821,7 +821,6 @@
           throw new Error(json.error);
         }
 
-        // ✅ FIX: Access the data correctly
         const items = json.data?.data || [];
         const totalResults = json.data?.totalResults || items.length;
         
@@ -898,7 +897,7 @@
       renderTable();
     }
 
-    // ── BULK ANALYSIS ──
+    // ── BULK ANALYSIS – SINGLE POST REQUEST ──
     async function runBulkAnalysis() {
       const raw = bulkTextarea.value;
       const numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
@@ -915,73 +914,49 @@
       const startDate = state.bulkTimeStart ? formatDateForAPI(state.bulkTimeStart) : '';
       const endDate = state.bulkTimeEnd ? formatDateForAPI(state.bulkTimeEnd) : '';
 
-      const senderMap = {};
-      let totalCount = 0;
-      const total = numbers.length;
-      const concurrency = 600;
-      const batches = [];
-      for (let i = 0; i < numbers.length; i += concurrency) {
-        batches.push(numbers.slice(i, i + concurrency));
-      }
-
-      let completed = 0;
-      for (const batch of batches) {
-        const batchPromises = batch.map(async (num) => {
-          try {
-            const params = new URLSearchParams();
-            params.set('query', num);
-            params.set('page', 1);
-            if (startDate) params.set('startDate', startDate);
-            if (endDate) params.set('endDate', endDate);
-
-            const resp = await fetch(`${API_BASE}?${params.toString()}`);
-            if (!resp.ok) return { num, records: [], error: true };
-            const json = await resp.json();
-            const items = json.data?.data || [];
-            const mapped = items.map(item => ({
-              source: item.from || '',
-              destination: item.to || '',
-              text: item.message || '',
-              time: item.createdAt || ''
-            }));
-            return { num, records: mapped, error: false };
-          } catch (e) {
-            return { num, records: [], error: true };
-          }
+      try {
+        const resp = await fetch(`${API_BASE}/bulk`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ numbers, startDate, endDate })
         });
 
-        const batchResults = await Promise.all(batchPromises);
-        completed += batch.length;
-        const pct = Math.min(100, (completed / total) * 100);
-        progressFill.style.width = pct + '%';
-
-        for (const result of batchResults) {
-          if (!result.error && result.records.length > 0) {
-            totalCount += result.records.length;
-            for (const rec of result.records) {
-              const sender = rec.source || 'unknown';
-              senderMap[sender] = (senderMap[sender] || 0) + 1;
-            }
-          }
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(`Server error ${resp.status}: ${errText}`);
         }
-        updateSenderBreakdown(senderMap, totalCount);
-        bulkCountSpan.textContent = totalCount.toLocaleString();
+
+        const result = await resp.json();
+        if (!result.success) {
+          throw new Error(result.error || 'Bulk request failed');
+        }
+
+        state.totalBulkCount = result.totalCount;
+        bulkCountSpan.textContent = result.totalCount.toLocaleString();
+
+        // Convert breakdown array to object for senderMap
+        const senderObj = {};
+        result.breakdown.forEach(({ sender, count }) => {
+          senderObj[sender] = count;
+        });
+        state.senderMap = senderObj;
+        updateSenderBreakdown(senderObj, result.totalCount);
+
+        progressFill.style.width = '100%';
+
+        // Optionally load the first number's data into the table
+        if (numbers.length > 0) {
+          destInput.value = numbers[0];
+          await refreshTable(numbers[0]);
+        }
+      } catch (err) {
+        alert('Bulk analysis failed: ' + err.message);
+        senderBreakdown.innerHTML = '<div class="sender-empty">Error: ' + err.message + '</div>';
+      } finally {
+        bulkSearchBtn.disabled = false;
+        bulkSearchBtn.innerHTML = '<i class="fas fa-search"></i> Analyze';
+        setTimeout(() => { progressFill.style.width = '0%'; }, 2000);
       }
-
-      state.senderMap = senderMap;
-      state.totalBulkCount = totalCount;
-      bulkCountSpan.textContent = totalCount.toLocaleString();
-      updateSenderBreakdown(senderMap, totalCount);
-
-      if (numbers.length > 0) {
-        destInput.value = numbers[0];
-        await refreshTable(numbers[0]);
-      }
-
-      bulkSearchBtn.disabled = false;
-      bulkSearchBtn.innerHTML = '<i class="fas fa-search"></i> Analyze';
-      progressFill.style.width = '100%';
-      setTimeout(() => { progressFill.style.width = '0%'; }, 2000);
     }
 
     function updateSenderBreakdown(senderMap, total) {
