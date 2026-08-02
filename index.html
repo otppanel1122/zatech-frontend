@@ -1,13 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
   <title>SMS Gateway · Bulk Sender Analysis</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <style>
-    /* (same as your original styles, plus a modal) */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Inter', -apple-system, system-ui, sans-serif;
@@ -211,7 +210,11 @@
       padding: 6px 4px;
       border-bottom: 1px solid #edf2f7;
       font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      border-radius: 4px;
     }
+    .sender-item:hover { background: var(--bg-hover); }
     .sender-item:last-child { border-bottom: none; }
     .sender-name {
       font-weight: 600;
@@ -239,6 +242,39 @@
       font-size: 13px;
     }
     .sender-loading i { margin-right: 6px; color: #3b82f6; }
+
+    /* SID Detail Table */
+    .sid-detail-table {
+      margin-top: 16px;
+      display: none;
+    }
+    .sid-detail-table .table-container {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .sid-detail-table .table-container::-webkit-scrollbar { width: 4px; }
+    .sid-detail-table .table-container::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 10px; }
+    .sid-detail-close {
+      float: right;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .sid-detail-close:hover { background: var(--bg-hover); color: var(--text); }
+    .sid-detail-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
 
     .main-panel {
       flex: 1;
@@ -437,7 +473,7 @@
       vertical-align: middle;
       line-height: 1.4;
     }
-    tr:hover td { background: #fafdff; cursor: pointer; }
+    tr:hover td { background: #fafdff; }
     tr:last-child td { border-bottom: none; }
 
     .datetime-cell {
@@ -523,65 +559,6 @@
     }
     .footer-bar span { color: #64748b; }
 
-    /* ── Modal for destination dropdown ── */
-    .modal-overlay {
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.4);
-      backdrop-filter: blur(4px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-    }
-    .modal-overlay.active { display: flex; }
-    .modal-box {
-      background: white;
-      border-radius: 28px;
-      max-width: 600px;
-      width: 90%;
-      max-height: 80vh;
-      padding: 28px 24px 20px;
-      box-shadow: 0 30px 60px rgba(0,0,0,0.2);
-      overflow-y: auto;
-      position: relative;
-    }
-    .modal-box h2 {
-      font-size: 20px;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .modal-box h2 i { color: #3b82f6; }
-    .modal-close {
-      position: absolute;
-      top: 16px; right: 20px;
-      font-size: 24px;
-      background: none;
-      border: none;
-      color: #94a3b8;
-      cursor: pointer;
-      transition: 0.2s;
-    }
-    .modal-close:hover { color: #1e293b; }
-    .modal-dest-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 4px;
-      border-bottom: 1px solid #edf2f7;
-      font-size: 14px;
-    }
-    .modal-dest-item:last-child { border-bottom: none; }
-    .modal-dest-item .dest-number { font-weight: 600; color: #0b1f33; }
-    .modal-dest-item .dest-count {
-      background: #f1f5f9;
-      padding: 2px 12px;
-      border-radius: 30px;
-      font-size: 12px;
-      color: #475569;
-    }
-
     @media (max-width: 1024px) {
       .app-container { flex-direction: column; }
       .sidebar {
@@ -608,7 +585,6 @@
       td { padding: 10px 8px; }
       .sidebar { padding: 16px; }
       .sidebar textarea { min-height: 80px; }
-      .modal-box { width: 95%; padding: 20px 16px; }
     }
   </style>
 </head>
@@ -650,6 +626,27 @@
         <div class="sidebar-title">Sender Breakdown</div>
         <div class="sender-breakdown" id="senderBreakdown">
           <div class="sender-empty">No data yet. Run analysis.</div>
+        </div>
+        <!-- SID Detail Table -->
+        <div class="sid-detail-table" id="sidDetailTable">
+          <div class="sid-detail-title">
+            <span id="sidDetailTitle">SMS Records for: <span id="sidDetailName"></span></span>
+            <button class="sid-detail-close" id="sidDetailClose"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="table-container">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="col-datetime">Date &amp; Time</th>
+                  <th class="sender-cell">Sender ID</th>
+                  <th class="phone-cell">Phone Number</th>
+                  <th class="message-cell">Message</th>
+                </tr>
+              </thead>
+              <tbody id="sidDetailResults">
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -715,18 +712,9 @@
   </main>
 </div>
 
-<!-- MODAL for destination list -->
-<div class="modal-overlay" id="destModal">
-  <div class="modal-box">
-    <button class="modal-close" id="modalClose">&times;</button>
-    <h2><i class="fas fa-phone-alt"></i> Destinations for <span id="modalSender"></span></h2>
-    <div id="modalDestList"></div>
-  </div>
-</div>
-
 <script>
   (function() {
-    // ── configuration ──
+    // ⚠️ CHANGE THIS to your deployed backend URL
     const API_BASE = 'https://zatech-backend.onrender.com/api/sms';
 
     // ── state ──
@@ -744,8 +732,7 @@
       loading: false,
       senderMap: {},
       totalBulkCount: 0,
-      // This will hold sender -> { destination: count } from the bulk result
-      senderDestinations: {}
+      bulkFilteredRecords: []
     };
 
     // ── DOM refs ──
@@ -765,10 +752,10 @@
     const pageIndicator = document.getElementById('pageIndicator');
     const prevBtn = document.getElementById('prevPage');
     const nextBtn = document.getElementById('nextPage');
-    const modal = document.getElementById('destModal');
-    const modalClose = document.getElementById('modalClose');
-    const modalSender = document.getElementById('modalSender');
-    const modalDestList = document.getElementById('modalDestList');
+    const sidDetailTable = document.getElementById('sidDetailTable');
+    const sidDetailName = document.getElementById('sidDetailName');
+    const sidDetailResults = document.getElementById('sidDetailResults');
+    const sidDetailClose = document.getElementById('sidDetailClose');
 
     // ── 5am‑based date helpers ──
     function get5amDate(date) {
@@ -951,9 +938,9 @@
         return;
       }
       let html = '';
-      rows.forEach((r, idx) => {
+      rows.forEach(r => {
         const { date, time } = splitDateTime(r.time);
-        html += `<tr data-index="${idx}">
+        html += `<tr>
           <td><div class="datetime-cell"><span class="date">${date}</span><span class="time">${time}</span></div></td>
           <td class="service-col">${r.service || 'N/A'}</td>
           <td class="source-col">${r.source || 'N/A'}</td>
@@ -966,54 +953,14 @@
       const end = Math.min(state.page * state.perPage, state.total);
       recordCountText.textContent = `${start} – ${end} of ${state.total}`;
       pageIndicator.textContent = state.page;
-
-      // Attach click listeners to rows
-      document.querySelectorAll('#smsTableBody tr').forEach((tr, idx) => {
-        tr.addEventListener('click', function() {
-          const rowData = state.data[idx];
-          if (rowData) {
-            showDestinations(rowData.source);
-          }
-        });
-      });
     }
 
-    // ── Modal: show destinations for a sender ──
-    function showDestinations(sender) {
-      if (!sender) return;
-      // Use the bulk senderDestinations (if available), otherwise build from current page data
-      let destMap = state.senderDestinations[sender];
-      if (!destMap || Object.keys(destMap).length === 0) {
-        // Fallback: build from current page data (if bulk not available)
-        destMap = {};
-        state.data.forEach(rec => {
-          if (rec.source === sender && rec.destination) {
-            destMap[rec.destination] = (destMap[rec.destination] || 0) + 1;
-          }
-        });
-      }
-      if (!destMap || Object.keys(destMap).length === 0) {
-        modalDestList.innerHTML = '<div style="color:#94a3b8; padding:20px 0;">No destinations found for this sender.</div>';
-      } else {
-        let html = '';
-        const sorted = Object.entries(destMap).sort((a, b) => b[1] - a[1]);
-        sorted.forEach(([number, count]) => {
-          html += `<div class="modal-dest-item">
-            <span class="dest-number">${number}</span>
-            <span class="dest-count">${count} SMS</span>
-          </div>`;
-        });
-        modalDestList.innerHTML = html;
-      }
-      modalSender.textContent = sender;
-      modal.classList.add('active');
+    async function refreshTable(destOverride = null) {
+      await fetchSMS(destOverride);
+      renderTable();
     }
 
-    function closeModal() {
-      modal.classList.remove('active');
-    }
-
-    // ── Bulk analysis with streaming ──
+    // ── FAST BULK ANALYSIS using optimized endpoint ──
     async function runBulkAnalysis() {
       const raw = bulkTextarea.value;
       const numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
@@ -1022,97 +969,78 @@
         return;
       }
 
-      if (numbers.length > 5000) {
-        if (!confirm(`You are about to analyze ${numbers.length} numbers. This may take several minutes. Continue?`)) {
-          return;
-        }
-      }
-
       bulkSearchBtn.disabled = true;
       bulkSearchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
       progressFill.style.width = '0%';
-      senderBreakdown.innerHTML = '<div class="sender-loading"><i class="fas fa-spinner fa-spin"></i> Fetching data... (real-time updates)</div>';
+      senderBreakdown.innerHTML = '<div class="sender-loading"><i class="fas fa-spinner fa-spin"></i> Fetching data...</div>';
+      sidDetailTable.style.display = 'none';
 
       const startDate = state.bulkTimeStart ? formatDateForAPI(state.bulkTimeStart) : '';
       const endDate = state.bulkTimeEnd ? formatDateForAPI(state.bulkTimeEnd) : '';
 
-      // Reset state
-      state.senderDestinations = {};
-      state.senderMap = {};
-      state.totalBulkCount = 0;
-
       try {
-        const response = await fetch(`${API_BASE}/bulk-stream`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ numbers, startDate, endDate })
-        });
+        // Use the optimized bulk endpoint
+        const params = new URLSearchParams();
+        params.set('numbers', numbers.join(','));
+        if (startDate) params.set('startDate', startDate);
+        if (endDate) params.set('endDate', endDate);
 
-        if (!response.ok) {
-          let errMsg = `Server error ${response.status}`;
-          try {
-            const errData = await response.json();
-            errMsg = errData.error || errMsg;
-          } catch (e) {}
-          throw new Error(errMsg);
+        const resp = await fetch(`${API_BASE}/bulk?${params.toString()}`);
+        
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
         }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-
-          for (const line of lines) {
-            if (line.trim() === '') continue;
-            try {
-              const data = JSON.parse(line);
-              if (data.error) {
-                throw new Error(data.error);
-              }
-              // Update total count
-              state.totalBulkCount = data.totalCount;
-              bulkCountSpan.textContent = data.totalCount.toLocaleString();
-
-              // Update sender breakdown
-              const senderObj = {};
-              data.breakdown.forEach(({ sender, count }) => {
-                senderObj[sender] = count;
-              });
-              state.senderMap = senderObj;
-              updateSenderBreakdown(senderObj, data.totalCount);
-
-              // Update progress bar
-              if (data.progress !== undefined) {
-                progressFill.style.width = data.progress + '%';
-              }
-
-              if (data.done) {
-                // Store the full senderDestinations from the final payload
-                if (data.senderDestinations) {
-                  state.senderDestinations = data.senderDestinations;
-                }
-                progressFill.style.width = '100%';
-                // Load first number into table
-                if (numbers.length > 0) {
-                  destInput.value = numbers[0];
-                  await refreshTable(numbers[0]);
-                }
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse line:', line, parseError);
-            }
-          }
+        
+        const json = await resp.json();
+        
+        if (json.error) {
+          throw new Error(json.error);
         }
+        
+        const { totalCount, breakdown, records } = json;
+        
+        // Update UI
+        bulkCountSpan.textContent = totalCount.toLocaleString();
+        state.bulkFilteredRecords = records || [];
+        
+        if (totalCount === 0) {
+          senderBreakdown.innerHTML = `
+            <div class="sender-empty">
+              No SMS records found for these numbers.
+            </div>
+          `;
+        } else {
+          // Update breakdown
+          let html = '';
+          breakdown.forEach(({ sender, count }) => {
+            html += `<div class="sender-item" data-sid="${sender}">
+              <span class="sender-name"><i class="fas fa-user"></i> ${sender}</span>
+              <span class="sender-count">${count.toLocaleString()}</span>
+            </div>`;
+          });
+          senderBreakdown.innerHTML = html;
+          
+          // Add click handlers for detail view
+          senderBreakdown.querySelectorAll('.sender-item').forEach(el => {
+            el.addEventListener('click', function() {
+              const sid = this.dataset.sid;
+              showSidDetails(sid);
+            });
+          });
+        }
+        
+        progressFill.style.width = '100%';
+        showToast(`Found ${totalCount} SMS records for ${numbers.length} numbers`, 'success');
+        
       } catch (err) {
-        alert('Bulk analysis failed: ' + err.message);
-        senderBreakdown.innerHTML = '<div class="sender-empty">Error: ' + err.message + '</div>';
+        console.error('Bulk error:', err);
+        showToast(`Error: ${err.message}`, 'error');
+        senderBreakdown.innerHTML = `
+          <div class="sender-empty">
+            Error fetching data. Please try again.
+            <br><small style="color:var(--text-muted);">${err.message}</small>
+          </div>
+        `;
       } finally {
         bulkSearchBtn.disabled = false;
         bulkSearchBtn.innerHTML = '<i class="fas fa-search"></i> Analyze';
@@ -1120,25 +1048,37 @@
       }
     }
 
-    function updateSenderBreakdown(senderMap, total) {
-      if (Object.keys(senderMap).length === 0) {
-        senderBreakdown.innerHTML = '<div class="sender-empty">No sender data found</div>';
+    // ── Show SID Details ──
+    function showSidDetails(sid) {
+      const records = state.bulkFilteredRecords.filter(rec => {
+        return (rec.from || 'unknown') === sid;
+      });
+
+      if (records.length === 0) {
+        showToast('No records found for this Sender ID', 'info');
         return;
       }
-      const sorted = Object.entries(senderMap).sort((a, b) => b[1] - a[1]);
-      let html = '';
-      sorted.forEach(([sender, count]) => {
-        html += `<div class="sender-item">
-          <span class="sender-name"><i class="fas fa-user"></i> ${sender}</span>
-          <span class="sender-count">${count.toLocaleString()}</span>
-        </div>`;
-      });
-      senderBreakdown.innerHTML = html;
-    }
 
-    async function refreshTable(destOverride = null) {
-      await fetchSMS(destOverride);
-      renderTable();
+      sidDetailName.textContent = sid;
+      sidDetailResults.innerHTML = records.map(s => {
+        const dt = s.createdAt || 'N/A';
+        let datePart = dt,
+            timePart = '';
+        if (dt !== 'N/A') {
+          const d = new Date(dt);
+          datePart = d.toISOString().split('T')[0];
+          timePart = d.toTimeString().split(' ')[0];
+        }
+        return `<tr>
+          <td class="col-datetime"><span class="dt-date">${datePart}</span><span class="dt-time">${timePart}</span></td>
+          <td class="sender-cell">${s.from || 'N/A'}</td>
+          <td class="phone-cell">${s.to || 'N/A'}</td>
+          <td class="message-cell">${s.message || 'N/A'}</td>
+        </tr>`;
+      }).join('');
+
+      sidDetailTable.style.display = 'block';
+      sidDetailTable.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     // ── presets ──
@@ -1175,6 +1115,38 @@
       state.page = newPage;
       const val = destInput.value.trim().replace(/^\+/, '') || state.destination;
       if (val) refreshTable(val);
+    }
+
+    // ── Toast ──
+    function showToast(msg, type = 'success') {
+      const container = document.querySelector('.toast-container');
+      if (!container) {
+        // Create toast container if it doesn't exist
+        const newContainer = document.createElement('div');
+        newContainer.className = 'toast-container';
+        document.body.appendChild(newContainer);
+        container = newContainer;
+      }
+      
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
+      const titles = { success: 'Success', error: 'Error', info: 'Info' };
+      toast.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="toast-title"><i class="fas ${icons[type] || 'fa-info-circle'}"></i> ${titles[type] || 'Info'}</div>
+          <button class="toast-close" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="toast-body">${msg}</div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => {
+        if (toast.parentElement) {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateX(30px)';
+          setTimeout(() => toast.remove(), 300);
+        }
+      }, 5000);
     }
 
     // ── events ──
@@ -1216,6 +1188,10 @@
         });
       });
 
+      sidDetailClose.addEventListener('click', () => {
+        sidDetailTable.style.display = 'none';
+      });
+
       prevBtn.addEventListener('click', () => changePage(-1));
       nextBtn.addEventListener('click', () => changePage(1));
 
@@ -1237,15 +1213,6 @@
       });
 
       bulkSearchBtn.addEventListener('click', runBulkAnalysis);
-
-      // Modal close
-      modalClose.addEventListener('click', closeModal);
-      modal.addEventListener('click', function(e) {
-        if (e.target === this) closeModal();
-      });
-      document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') closeModal();
-      });
     }
 
     // ── init ──
