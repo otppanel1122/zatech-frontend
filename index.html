@@ -112,6 +112,48 @@
     .sidebar textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59,130,246,0.12); }
     .sidebar textarea::placeholder { color: #9aaec3; font-weight: 400; }
 
+    .file-upload-area {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .file-upload-area label {
+      background: #f1f5f9;
+      border: 1.5px dashed #cbd5e1;
+      border-radius: 40px;
+      padding: 6px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1e293b;
+      cursor: pointer;
+      transition: 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .file-upload-area label:hover { background: #e9edf4; border-color: #94a3b8; }
+    .file-upload-area label i { color: #3b82f6; }
+    .file-upload-area input[type="file"] { display: none; }
+    .file-upload-area .file-name {
+      font-size: 12px;
+      color: #64748b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 160px;
+    }
+    .file-upload-area .clear-file {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+    }
+    .file-upload-area .clear-file:hover { color: #ef4444; }
+
     .date-presets {
       display: flex;
       flex-wrap: wrap;
@@ -567,6 +609,15 @@
 +923001234569</textarea>
       </div>
       <div>
+        <div class="sidebar-title">Or Upload File</div>
+        <div class="file-upload-area">
+          <label for="fileInput"><i class="fas fa-upload"></i> Choose file</label>
+          <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.txt">
+          <span class="file-name" id="fileName">No file chosen</span>
+          <button class="clear-file" id="clearFile" title="Clear file"><i class="fas fa-times-circle"></i></button>
+        </div>
+      </div>
+      <div>
         <div class="sidebar-title">Bulk Date Range</div>
         <div class="date-presets" id="presetContainer">
           <button data-preset="today">Today</button>
@@ -654,6 +705,7 @@
   </main>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
   (function() {
     // ⚠️ CHANGE THIS to your deployed backend URL
@@ -693,6 +745,9 @@
     const pageIndicator = document.getElementById('pageIndicator');
     const prevBtn = document.getElementById('prevPage');
     const nextBtn = document.getElementById('nextPage');
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const clearFileBtn = document.getElementById('clearFile');
 
     // ── 5am‑based date helpers ──
     function get5amDate(date) {
@@ -821,7 +876,6 @@
           throw new Error(json.error);
         }
 
-        // ✅ FIX: Access the data correctly
         const items = json.data?.data || [];
         const totalResults = json.data?.totalResults || items.length;
         
@@ -898,12 +952,80 @@
       renderTable();
     }
 
+    // ── File upload handler ──
+    function handleFile(file) {
+      if (!file) return;
+      fileName.textContent = file.name;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        let numbers = [];
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (ext === 'txt') {
+          const text = e.target.result;
+          numbers = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        } else if (ext === 'csv') {
+          const text = e.target.result;
+          const lines = text.split('\n').filter(line => line.trim().length > 0);
+          lines.forEach(line => {
+            const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
+            parts.forEach(p => {
+              if (p.match(/^[\+\d\s\-\(\)]+$/)) numbers.push(p);
+            });
+          });
+        } else if (ext === 'xlsx' || ext === 'xls') {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+            json.forEach(row => {
+              if (row && row.length > 0) {
+                row.forEach(cell => {
+                  if (cell && String(cell).match(/^[\+\d\s\-\(\)]+$/)) {
+                    numbers.push(String(cell).trim());
+                  }
+                });
+              }
+            });
+          } catch (err) {
+            console.warn('XLSX parse error:', err);
+            alert('Failed to parse Excel file. Please ensure it contains valid phone numbers.');
+          }
+        }
+        // clean and deduplicate
+        numbers = numbers.map(n => n.replace(/^\+/, '').trim()).filter(n => n.length > 0);
+        if (numbers.length === 0) {
+          alert('No phone numbers found in the file.');
+          return;
+        }
+        bulkTextarea.value = numbers.join('\n');
+        fileName.textContent = file.name + ' ✅';
+      };
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        reader.readAsArrayBuffer(file);
+      } else {
+        reader.readAsText(file);
+      }
+    }
+
+    fileInput.addEventListener('change', function(e) {
+      if (this.files && this.files.length > 0) {
+        handleFile(this.files[0]);
+      }
+      this.value = '';
+    });
+
+    clearFileBtn.addEventListener('click', function() {
+      fileInput.value = '';
+      fileName.textContent = 'No file chosen';
+    });
+
     // ── BULK ANALYSIS ──
     async function runBulkAnalysis() {
       const raw = bulkTextarea.value;
-      const numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
+      let numbers = raw.split('\n').map(s => s.trim().replace(/^\+/, '')).filter(s => s.length > 0);
       if (numbers.length === 0) {
-        alert('Please paste at least one phone number.');
+        alert('Please paste at least one phone number or upload a file.');
         return;
       }
 
